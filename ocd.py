@@ -8,24 +8,34 @@ Based on OpenOCD RPC example by Andreas Ortmann (ortmann@finf.uni-hannover.de)
 
 import socket
 import itertools
+from time import sleep
+
 
 def strtohex(data):
     return map(strtohex, data) if isinstance(data, list) else int(data, 16)
 
+
 def hexify(data):
     return "<None>" if data is None else ("0x%08x" % data)
+
 
 def compare_data(a, b):
     for i, j, num in zip(a, b, itertools.count(0)):
         if i != j:
             print("difference at %d: %s != %s" % (num, hexify(i), hexify(j)))
 
+
+class OCDError(Exception):
+    pass
+
+
 class OpenOcd():
     COMMAND_TOKEN = '\x1a'
-    def __init__(self, verbose=False):
+
+    def __init__(self, verbose=False, tcl_ip="127.0.0.1", tcl_port=6666):
         self.verbose = verbose
-        self.tcl_ip = "127.0.0.1"
-        self.tcl_port = 6666
+        self.tcl_ip = tcl_ip
+        self.tcl_port = tcl_port
         self.buffer_size = 4096
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -41,7 +51,8 @@ class OpenOcd():
             self.sock.close()
 
     def send(self, cmd):
-        """Send a command string to TCL RPC. Return the result that was read."""
+        """Send a command string to TCL RPC. Return the result that was read.
+        """
         data = (cmd + OpenOcd.COMMAND_TOKEN).encode("utf-8")
         if self.verbose:
             print("<- ", data)
@@ -62,7 +73,7 @@ class OpenOcd():
             print("-> ", data)
 
         data = data.decode("utf-8").strip()
-        data = data[:-1] # strip trailing \x1a
+        data = data[:-1]  # strip trailing \x1a
 
         return data
 
@@ -71,7 +82,7 @@ class OpenOcd():
         return None if (len(raw) < 2) else strtohex(raw[1])
 
     def read_memory(self, wordLen, address, n):
-        self.send("array unset output") # better to clear the array before
+        self.send("array unset output")  # better to clear the array before
         self.send("mem2array output %d 0x%x %d" % (wordLen, address, n))
 
         output = self.send("ocd_echo $output").split(" ")
@@ -85,43 +96,60 @@ class OpenOcd():
     def write_memory(self, wordLen, address, n, data):
         array = " ".join(["%d 0x%x" % (a, b) for a, b in enumerate(data)])
 
-        self.send("array unset buffer") # better to clear the array before
+        self.send("array unset buffer")  # better to clear the array before
         self.send("array set buffer { %s }" % array)
         self.send("array2mem buffer  0x%x %s %d" % (wordLen, address, n))
 
-if __name__ == "__main__":
+    def read_register(self, reg):
+        raw = self.send("ocd_reg {}".format(reg))
+        value = raw.split(":")[1].strip()
 
-    def show(*args):
-        print(*args, end="\n\n")
+        return int(value, 16)
 
-    with OpenOcd() as ocd:
-        ocd.send("reset")
+    def write_register(self, reg, value):
+        self.send("ocd_reg {} {}".format(reg, value))
 
-        show(ocd.send("ocd_echo \"echo says hi!\"")[:-1])
-        show(ocd.send("capture \"ocd_halt\"")[:-1])
+    def set_breakpoint(self, addr):
+        self.send("ocd_bp {:#x} 2 hw".format(addr))
 
-        # Read the first few words at the RAM region (put starting adress of RAM
-        # region into 'addr')
-        addr = 0x10000000
+    def delete_breakpoint(self, addr):
+        self.send("ocd_rbp {:#x}".format(addr))
 
-        value = ocd.read_variable(addr)
-        show("variable @ %s: %s" % (hexify(addr), hexify(value)))
+    def halt(self):
+        self.send("halt")
 
-        ocd.write_variable(addr, 0xdeadc0de)
-        show("variable @ %s: %s" % (hexify(addr), hexify(ocd.read_variable(addr))))
+    def resume(self):
+        self.send("resume")
 
-        data = [1, 0, 0xaaaaaaaa, 0x23, 0x42, 0xffff]
-        wordlen = 32
-        n = len(data)
+    def set_tcl_variable(self, name, value):
+        self.send("set {} {}".format(name, value))
 
-        read = ocd.read_memory(wordlen, addr, n)
-        show("memory (before):", list(map(hexify, read)))
+    def get_tcl_variable(self, name):
+        self.send("set {}".format(name))
 
-        ocd.write_memory(wordlen, addr, n, data)
+    def call(self, addr):
+        """Call the function at `addr`. The target must be halted before calling
+        this method, and it must be resumed afterwards.
+        """
+        if self.send("$_TARGETNAME curstate") != "halted":
+            raise OCDError("Target must be halted to call function")
+        # save caller-save registers
+        regnames = ["pc", "sp", "r0", "r1", "r2", "r3"]
+        regs = {reg: self.read_register(reg) for reg in regnames}
 
-        read = ocd.read_memory(wordlen, addr, n)
-        show("memory  (after):", list(map(hexify, read)))
+        self.send("set call_done 0")
+        self.send("$_TARGETNAME configure -event halted { set call_done 1 }")
+        self.send("$_TARGETNAME configure -event debug-halted { set call_done 1 }")
+        self.set_breakpoint(regs["pc"])
+        self.write_register("pc", addr)
+        self.resume()
+        while self.send("set call_done") != '1':
+            sleep(0.01)
 
-        compare_data(read, data)
-
-        ocd.send("resume")
+        ret = self.read_register("r0")
+        self.send("$_TARGETNAME configure -event halted { }")
+        self.send("$_TARGETNAME configure -event debug-halted { }")
+        self.delete_breakpoint(regs["pc"])
+        for name, val in regs.items():
+            self.write_register(name, val)
+        return ret
