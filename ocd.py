@@ -53,6 +53,8 @@ class OpenOcd():
     def send(self, cmd):
         """Send a command string to TCL RPC. Return the result that was read.
         """
+        if self.verbose:
+            print(cmd)
         data = (cmd + OpenOcd.COMMAND_TOKEN).encode("utf-8")
         if self.verbose:
             print("<- ", data)
@@ -101,16 +103,27 @@ class OpenOcd():
         self.send("array2mem buffer  0x%x %s %d" % (wordLen, address, n))
 
     def read_register(self, reg):
-        raw = self.send("ocd_reg {}".format(reg))
+        raw = self.send("ocd_reg {} force".format(reg))
         value = raw.split(":")[1].strip()
 
         return int(value, 16)
 
     def write_register(self, reg, value):
-        self.send("ocd_reg {} {}".format(reg, value))
+        self.send("ocd_reg {} {:#x}".format(reg, value))
+
+    def push(self, value):
+        sp = self.read_register("sp")
+        self.write_register("sp", sp - 4)
+        self.write_variable(sp - 4, value)
+
+    def pop(self):
+        sp = self.read_register("sp")
+        value = self.read_variable(sp)
+        self.write_register("sp", sp + 4)
+        return value
 
     def set_breakpoint(self, addr):
-        self.send("ocd_bp {:#x} 2 hw".format(addr))
+        self.send("ocd_bp {:#x} 2".format(addr))
 
     def delete_breakpoint(self, addr):
         self.send("ocd_rbp {:#x}".format(addr))
@@ -127,21 +140,29 @@ class OpenOcd():
     def get_tcl_variable(self, name):
         self.send("set {}".format(name))
 
-    def call(self, addr):
+    def call(self, addr, *args):
         """Call the function at `addr`. The target must be halted before calling
         this method, and it must be resumed afterwards.
         """
+        if len(args) > 4:
+            raise OCDError("A maximum of 4 1-word arguments are accepted")
+
+        addr = addr & 0xfffffffe
+
         if self.send("$_TARGETNAME curstate") != "halted":
             raise OCDError("Target must be halted to call function")
         # save caller-save registers
-        regnames = ["pc", "sp", "r0", "r1", "r2", "r3"]
+        regnames = ["pc", "lr", "sp", "r0", "r1", "r2", "r3"]
         regs = {reg: self.read_register(reg) for reg in regnames}
+        for i, arg in enumerate(args):
+            self.write_register("r{}".format(i), arg)
 
         self.send("set call_done 0")
-        self.send("$_TARGETNAME configure -event halted { set call_done 1 }")
-        self.send("$_TARGETNAME configure -event debug-halted { set call_done 1 }")
-        self.set_breakpoint(regs["pc"])
+        self.send("$_TARGETNAME configure -event halted { set call_done 1 ; echo done }")
+        self.send("$_TARGETNAME configure -event debug-halted { set call_done 1 ; echo done }")
+        self.write_register("lr", regs["pc"] | 1)
         self.write_register("pc", addr)
+        self.set_breakpoint(regs["pc"])
         self.resume()
         while self.send("set call_done") != '1':
             sleep(0.01)
