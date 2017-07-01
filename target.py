@@ -1,4 +1,3 @@
-
 import ocd
 import nm
 
@@ -6,6 +5,8 @@ BUFSIZE = 2048
 
 
 class Target():
+    """Represents a target which OpenOCD is connected to.
+    """
     def __init__(self, openocd, elf_file):
         self.ocd = openocd
         self.symbol_table = nm.SymbolTable(elf_file)

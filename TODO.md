@@ -1,6 +1,8 @@
 
 # TODO
 
-- ocd-monitor/target acceboard.cfg works but not this one---I assume the board
-  is getting reset each time we connect.
-- Don't make a new OpenOCD object every time we call a function. 
+- Some way to make sure the image flashed on the target matches the loaded
+  ELF file
+- Disable and enable interrupts. An interrupt could occur during a test.
+- How can we work around waiting on locks? We want to be able to test periphs
+  over SPI, for example, but as it stands function calls act like ISRs.

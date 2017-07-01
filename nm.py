@@ -1,4 +1,5 @@
-
+"""Look up symbols in an ELF file.
+"""
 from collections import namedtuple
 import subprocess
 import re
@@ -27,6 +28,9 @@ def find_symbol(nm_output, symbol_name):
 
 
 class SymbolTable():
+    """On initialization, loads an ELF file to make looking up symbol addresses
+    and types by name easy.
+    """
     def __init__(self, elf_file):
         self.elf_file = elf_file
         self._table = {}
