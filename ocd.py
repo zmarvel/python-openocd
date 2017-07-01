@@ -29,7 +29,7 @@ class OCDError(Exception):
     pass
 
 
-class OpenOcd():
+class OpenOCD():
     COMMAND_TOKEN = '\x1a'
 
     def __init__(self, verbose=False, tcl_ip="127.0.0.1", tcl_port=6666):
@@ -55,7 +55,7 @@ class OpenOcd():
         """
         if self.verbose:
             print(cmd)
-        data = (cmd + OpenOcd.COMMAND_TOKEN).encode("utf-8")
+        data = (cmd + OpenOCD.COMMAND_TOKEN).encode("utf-8")
         if self.verbose:
             print("<- ", data)
 
@@ -68,7 +68,7 @@ class OpenOcd():
         while True:
             chunk = self.sock.recv(self.buffer_size)
             data += chunk
-            if bytes(OpenOcd.COMMAND_TOKEN, encoding="utf-8") in chunk:
+            if bytes(OpenOCD.COMMAND_TOKEN, encoding="utf-8") in chunk:
                 break
 
         if self.verbose:
@@ -128,6 +128,18 @@ class OpenOcd():
     def delete_breakpoint(self, addr):
         self.send("ocd_rbp {:#x}".format(addr))
 
+    def reset(self, halt=True):
+        """Reset the target. The default sends `reset halt` to OpenOCD, but
+        specifying `halt=False` will send `reset run`.
+        """
+        if halt:
+            self.send("reset halt")
+        else:
+            self.send("reset run")
+
+    def curstate(self):
+        return self.send("$_TARGETNAME curstate")
+
     def halt(self):
         self.send("halt")
 
@@ -149,7 +161,7 @@ class OpenOcd():
 
         addr = addr & 0xfffffffe
 
-        if self.send("$_TARGETNAME curstate") != "halted":
+        if self.curstate() != "halted":
             raise OCDError("Target must be halted to call function")
         # save caller-save registers
         regnames = ["pc", "lr", "sp", "r0", "r1", "r2", "r3"]
@@ -158,8 +170,10 @@ class OpenOcd():
             self.write_register("r{}".format(i), arg)
 
         self.send("set call_done 0")
-        self.send("$_TARGETNAME configure -event halted { set call_done 1 ; echo done }")
-        self.send("$_TARGETNAME configure -event debug-halted { set call_done 1 ; echo done }")
+        self.send(("$_TARGETNAME configure -event halted "
+                   "{ set call_done 1 ; echo done }"))
+        self.send(("$_TARGETNAME configure -event debug-halted "
+                   "{ set call_done 1 ; echo done }"))
         self.write_register("lr", regs["pc"] | 1)
         self.write_register("pc", addr)
         self.set_breakpoint(regs["pc"])
