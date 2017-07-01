@@ -1,3 +1,0 @@
-[submodule "target/ChibiOS"]
-	path = target/ChibiOS
-	url = git@github.com:bhimebau/ChibiOS.git
