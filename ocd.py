@@ -102,6 +102,14 @@ class OpenOCD():
         self.send("array set buffer { %s }" % array)
         self.send("array2mem buffer  0x%x %s %d" % (wordLen, address, n))
 
+    def dump_image(self, filename, address, size):
+        self.send("dump_image {} {:#x} {}".format(filename, address, size))
+
+    def verify_image(self, filename, address, fmt='bin'):
+        ret = self.send("ocd_verify_image {} {:#x} {}".format(filename, address, fmt))
+        status = ret.split('\n')[-2]
+        return status.startswith('verified')
+
     def read_register(self, reg):
         raw = self.send("ocd_reg {} force".format(reg))
         value = raw.split(":")[1].strip()
@@ -143,8 +151,13 @@ class OpenOCD():
     def halt(self):
         self.send("halt")
 
+    def wait_halt(self):
+        res = self.send("ocd_wait_halt")
+        if not res.startswith('target halted'):
+            self._recv()
+
     def resume(self):
-        self.send("resume")
+        self.send("ocd_resume")
 
     def set_tcl_variable(self, name, value):
         self.send("set {} {}".format(name, value))
