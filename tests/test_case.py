@@ -1,10 +1,9 @@
+# To run test case, use this command:
+# PYTHONPATH='src' python3 -m pytest tests/test_case.py
 
 from time import sleep
 import unittest
-import nm
-import ocd
-import target
-
+from openocd import nm, ocd, target
 
 class OCDTestCase(unittest.TestCase):
     """Example test case. Note that OpenOCD must be attached to the target; if
