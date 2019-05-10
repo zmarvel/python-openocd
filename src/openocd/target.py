@@ -1,5 +1,4 @@
-import ocd
-import nm
+from openocd import ocd, nm
 
 BUFSIZE = 2048
 
